@@ -9,16 +9,14 @@ app.get("/", (req, res) => {
   res.send("✅ Heroku server is running and ready!");
 });
 
-// NEW: Handle payment POST
+// Dummy route to receive raw card info (for future use or testing)
 app.post("/", (req, res) => {
   const { email, cardNumber, expirationDate, cvv } = req.body;
 
-  // Check for required fields
   if (!email || !cardNumber || !expirationDate || !cvv) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  // Just a dummy response for now
   return res.json({
     message: "Received payment info!",
     data: {
@@ -30,10 +28,7 @@ app.post("/", (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Heroku server is running and ready on port ${PORT}`);
-});
-
+// Actual Authorize.Net payment endpoint using stored profiles
 app.post("/payment", async (req, res) => {
   try {
     const {
@@ -75,6 +70,22 @@ app.post("/payment", async (req, res) => {
       const response = new APIContracts.CreateTransactionResponse(apiResponse);
 
       if (response != null && response.getMessages().getResultCode() === "Ok") {
-        res.status(200).json({ success: true, transactionId: response.getTransactionResponse().getTransId() });
+        res.status(200).json({
+          success: true,
+          transactionId: response.getTransactionResponse().getTransId()
+        });
       } else {
-        const errorMessage =
+        const errorMessage = response.getMessages().getMessage()[0].getText();
+        res.status(500).json({ success: false, error: errorMessage });
+      }
+    });
+  } catch (err) {
+    console.error("❌ Server error:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+// Start the server
+app.listen(PORT, () => {
+  console.log(`✅ Heroku server is running and ready on port ${PORT}`);
+});
