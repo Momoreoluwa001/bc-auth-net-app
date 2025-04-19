@@ -1,27 +1,35 @@
 const express = require("express");
-const bodyParser = require("body-parser");
-const cors = require("cors");
-const { APIContracts, APIControllers } = require("authorizenet");
-require("dotenv").config();
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// Test route to make sure server works
+// Default route
 app.get("/", (req, res) => {
   res.send("✅ Heroku server is running and ready!");
 });
 
-// Test route for saving payment method (mock)
-app.post("/api/save-payment", async (req, res) => {
-  // For now we just log the incoming request
-  console.log("Payment data received:", req.body);
-  res.send({ message: "Payment route hit!" });
+// NEW: Handle payment POST
+app.post("/", (req, res) => {
+  const { email, cardNumber, expirationDate, cvv } = req.body;
+
+  // Check for required fields
+  if (!email || !cardNumber || !expirationDate || !cvv) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  // Just a dummy response for now
+  return res.json({
+    message: "Received payment info!",
+    data: {
+      email,
+      cardNumber,
+      expirationDate,
+      cvv
+    }
+  });
 });
 
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`✅ Heroku server is running and ready on port ${PORT}`);
 });
