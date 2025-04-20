@@ -48,19 +48,39 @@ app.post('/payment', async (req, res) => {
       const apiResponse = controller.getResponse();
       const response = new APIContracts.CreateTransactionResponse(apiResponse);
 
+      const transactionResponse = response.getTransactionResponse();
+
       if (
         response &&
         response.getMessages().getResultCode() === APIContracts.MessageTypeEnum.OK &&
-        response.getTransactionResponse().getResponseCode() === '1'
+        transactionResponse &&
+        transactionResponse.getResponseCode() === '1'
       ) {
         return res.json({
           success: true,
-          transactionId: response.getTransactionResponse().getTransId(),
-          authCode: response.getTransactionResponse().getAuthCode(),
-          message: response.getTransactionResponse().getMessages().getMessage()[0].getDescription(),
+          transactionId: transactionResponse.getTransId(),
+          authCode: transactionResponse.getAuthCode(),
+          message: transactionResponse.getMessages().getMessage()[0].getDescription(),
         });
       } else {
-        const errorMessage = response.getTransactionResponse()?.getErrors()?.getError()[0]?.getErrorText() || 'Payment failed';
+        let errorMessage = 'Payment failed';
+
+        if (transactionResponse) {
+          const errors = transactionResponse.getErrors();
+          if (errors) {
+            errorMessage = errors.getError()[0].getErrorText();
+          } else if (transactionResponse.getMessages()) {
+            errorMessage = transactionResponse.getMessages().getMessage()[0].getDescription();
+          } else {
+            errorMessage = `Transaction response code: ${transactionResponse.getResponseCode()}`;
+          }
+        } else {
+          const messages = response.getMessages();
+          if (messages && messages.getMessage().length > 0) {
+            errorMessage = messages.getMessage()[0].getText();
+          }
+        }
+
         return res.status(400).json({ success: false, message: errorMessage });
       }
     });
