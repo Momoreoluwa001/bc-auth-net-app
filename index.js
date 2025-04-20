@@ -22,24 +22,33 @@ app.post('/payment', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing required fields.' });
     }
 
-    // Create the payment transaction request
-    const paymentType = new APIContracts.CustomerProfilePaymentType();
-    paymentType.setCustomerProfileId(customerProfileId);
-    paymentType.setPaymentProfile({ paymentProfileId: customerPaymentProfileId });
+    // ✅ Set up merchant credentials
+    const merchantAuthentication = new APIContracts.MerchantAuthenticationType();
+    merchantAuthentication.setName(process.env.AUTHORIZE_API_LOGIN_ID);
+    merchantAuthentication.setTransactionKey(process.env.AUTHORIZE_TRANSACTION_KEY);
 
+    // ✅ Set up payment profile properly
+    const paymentProfile = new APIContracts.PaymentProfile();
+    paymentProfile.setPaymentProfileId(customerPaymentProfileId);
+
+    const profileToCharge = new APIContracts.CustomerProfilePaymentType();
+    profileToCharge.setCustomerProfileId(customerProfileId);
+    profileToCharge.setPaymentProfile(paymentProfile);
+
+    // ✅ Build transaction request
     const transactionRequest = new APIContracts.TransactionRequestType();
     transactionRequest.setTransactionType(APIContracts.TransactionTypeEnum.AUTHCAPTURETRANSACTION);
-    transactionRequest.setAmount(amount);
-    transactionRequest.setProfile(paymentType);
+    transactionRequest.setAmount(parseFloat(amount));
+    transactionRequest.setProfile(profileToCharge);
+
     if (orderId) {
-      transactionRequest.setOrder({ invoiceNumber: orderId });
+      const orderDetails = new APIContracts.OrderType();
+      orderDetails.setInvoiceNumber(orderId);
+      transactionRequest.setOrder(orderDetails);
     }
 
     const createRequest = new APIContracts.CreateTransactionRequest();
-    createRequest.setMerchantAuthentication({
-      name: process.env.AUTHORIZE_API_LOGIN_ID,
-      transactionKey: process.env.AUTHORIZE_TRANSACTION_KEY,
-    });
+    createRequest.setMerchantAuthentication(merchantAuthentication);
     createRequest.setTransactionRequest(transactionRequest);
 
     const controller = new APIControllers.CreateTransactionController(createRequest.getJSON());
@@ -49,6 +58,9 @@ app.post('/payment', async (req, res) => {
       const response = new APIContracts.CreateTransactionResponse(apiResponse);
 
       const transactionResponse = response.getTransactionResponse();
+
+      // 🪵 Full log for debugging (view in Heroku logs)
+      console.log('🧾 Full Authorize.Net Response:', JSON.stringify(apiResponse, null, 2));
 
       if (
         response &&
@@ -85,7 +97,7 @@ app.post('/payment', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Payment error:', error.message);
+    console.error('🔥 Payment error:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
