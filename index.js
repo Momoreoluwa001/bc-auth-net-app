@@ -1,19 +1,42 @@
 const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Authorize.Net SDK
+const fs = require('fs');
+const path = require('path');
 const { APIContracts, APIControllers } = require('authorizenet');
 
-// Middleware to parse JSON
+const app = express();
+const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
-// Root route to confirm server is live
+// Path to JSON database
+const subscriptionsPath = path.join(__dirname, 'subscriptions.json');
+
+// Helper to load saved subscriptions
+function loadSubscriptions() {
+  if (!fs.existsSync(subscriptionsPath)) {
+    fs.writeFileSync(subscriptionsPath, JSON.stringify([]));
+  }
+  const data = fs.readFileSync(subscriptionsPath);
+  return JSON.parse(data);
+}
+
+// Helper to save all subscriptions
+function saveSubscriptions(subscriptions) {
+  fs.writeFileSync(subscriptionsPath, JSON.stringify(subscriptions, null, 2));
+}
+
+// Helper to add a new subscription
+function addSubscription(subscription) {
+  const subscriptions = loadSubscriptions();
+  subscriptions.push(subscription);
+  saveSubscriptions(subscriptions);
+}
+
+// ✅ Health check route
 app.get('/', (req, res) => {
   res.send('✅ Heroku server is running and ready!');
 });
 
-// Real payment processing route
+// ✅ Payment processing route
 app.post('/payment', async (req, res) => {
   try {
     const { amount, customerProfileId, customerPaymentProfileId, orderId } = req.body;
@@ -22,12 +45,10 @@ app.post('/payment', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing required fields.' });
     }
 
-    // ✅ Set up merchant credentials
     const merchantAuthentication = new APIContracts.MerchantAuthenticationType();
     merchantAuthentication.setName(process.env.AUTHORIZE_API_LOGIN_ID);
     merchantAuthentication.setTransactionKey(process.env.AUTHORIZE_TRANSACTION_KEY);
 
-    // ✅ Set up payment profile properly
     const paymentProfile = new APIContracts.PaymentProfile();
     paymentProfile.setPaymentProfileId(customerPaymentProfileId);
 
@@ -35,7 +56,6 @@ app.post('/payment', async (req, res) => {
     profileToCharge.setCustomerProfileId(customerProfileId);
     profileToCharge.setPaymentProfile(paymentProfile);
 
-    // ✅ Build transaction request
     const transactionRequest = new APIContracts.TransactionRequestType();
     transactionRequest.setTransactionType(APIContracts.TransactionTypeEnum.AUTHCAPTURETRANSACTION);
     transactionRequest.setAmount(parseFloat(amount));
@@ -59,7 +79,6 @@ app.post('/payment', async (req, res) => {
 
       const transactionResponse = response.getTransactionResponse();
 
-      // 🪵 Full log for debugging (view in Heroku logs)
       console.log('🧾 Full Authorize.Net Response:', JSON.stringify(apiResponse, null, 2));
 
       if (
@@ -102,7 +121,48 @@ app.post('/payment', async (req, res) => {
   }
 });
 
-// Start the server
+// ✅ Subscription creation route
+app.post('/subscribe', (req, res) => {
+  const {
+    bigcommerceCustomerId,
+    authNetCustomerProfileId,
+    authNetPaymentProfileId,
+    subscriptionType,
+    startDate // ISO string
+  } = req.body;
+
+  if (
+    !bigcommerceCustomerId ||
+    !authNetCustomerProfileId ||
+    !authNetPaymentProfileId ||
+    !subscriptionType ||
+    !startDate
+  ) {
+    return res.status(400).json({ success: false, message: 'Missing required fields' });
+  }
+
+  const nextBillingDate = new Date(startDate);
+  nextBillingDate.setDate(
+    nextBillingDate.getDate() + (subscriptionType === 'bi-monthly' ? 15 : 30)
+  );
+
+  const subscription = {
+    bigcommerceCustomerId,
+    authNetCustomerProfileId,
+    authNetPaymentProfileId,
+    subscriptionType,
+    startDate,
+    nextBillingDate: nextBillingDate.toISOString(),
+    discountApplied: true,
+    status: 'active'
+  };
+
+  addSubscription(subscription);
+
+  res.json({ success: true, subscription });
+});
+
+// ✅ Start server
 app.listen(PORT, () => {
   console.log(`✅ Heroku server is running and ready on port ${PORT}`);
 });
