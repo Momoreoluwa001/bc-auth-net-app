@@ -121,14 +121,16 @@ app.post('/payment', async (req, res) => {
   }
 });
 
-// ✅ Subscription creation route
+// ✅ Subscription creation route (with logging)
 app.post('/subscribe', (req, res) => {
+  console.log('📦 Received subscription request:', req.body); // <-- Log body
+
   const {
     bigcommerceCustomerId,
     authNetCustomerProfileId,
     authNetPaymentProfileId,
     subscriptionType,
-    startDate // ISO string
+    startDate
   } = req.body;
 
   if (
@@ -138,6 +140,13 @@ app.post('/subscribe', (req, res) => {
     !subscriptionType ||
     !startDate
   ) {
+    console.log('❌ Missing fields:', {
+      bigcommerceCustomerId,
+      authNetCustomerProfileId,
+      authNetPaymentProfileId,
+      subscriptionType,
+      startDate
+    });
     return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
 
