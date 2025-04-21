@@ -171,6 +171,93 @@ app.post('/subscribe', (req, res) => {
   res.json({ success: true, subscription });
 });
 
+
+// ✅ Route to process all active subscriptions
+app.post('/process-subscriptions', async (req, res) => {
+  const subscriptions = loadSubscriptions();
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+  let processedCount = 0;
+  let results = [];
+
+  for (let subscription of subscriptions) {
+    if (subscription.status !== 'active') continue;
+
+    const billingDate = new Date(subscription.nextBillingDate).toISOString().slice(0, 10);
+    if (billingDate > today) continue;
+
+    // Process payment
+    const merchantAuthentication = new APIContracts.MerchantAuthenticationType();
+    merchantAuthentication.setName(process.env.AUTHORIZE_API_LOGIN_ID);
+    merchantAuthentication.setTransactionKey(process.env.AUTHORIZE_TRANSACTION_KEY);
+
+    const paymentProfile = new APIContracts.PaymentProfile();
+    paymentProfile.setPaymentProfileId(subscription.authNetPaymentProfileId);
+
+    const profileToCharge = new APIContracts.CustomerProfilePaymentType();
+    profileToCharge.setCustomerProfileId(subscription.authNetCustomerProfileId);
+    profileToCharge.setPaymentProfile(paymentProfile);
+
+    const transactionRequest = new APIContracts.TransactionRequestType();
+    transactionRequest.setTransactionType(APIContracts.TransactionTypeEnum.AUTHCAPTURETRANSACTION);
+    transactionRequest.setAmount(85); // 👈 Adjust your actual charge amount
+    transactionRequest.setProfile(profileToCharge);
+
+    const createRequest = new APIContracts.CreateTransactionRequest();
+    createRequest.setMerchantAuthentication(merchantAuthentication);
+    createRequest.setTransactionRequest(transactionRequest);
+
+    const controller = new APIControllers.CreateTransactionController(createRequest.getJSON());
+
+    await new Promise((resolve) => {
+      controller.execute(() => {
+        const apiResponse = controller.getResponse();
+        const response = new APIContracts.CreateTransactionResponse(apiResponse);
+
+        const transactionResponse = response.getTransactionResponse();
+        if (
+          response &&
+          response.getMessages().getResultCode() === APIContracts.MessageTypeEnum.OK &&
+          transactionResponse &&
+          transactionResponse.getResponseCode() === '1'
+        ) {
+          // Update subscription billing date
+          const nextDate = new Date(subscription.nextBillingDate);
+          nextDate.setDate(
+            nextDate.getDate() + (subscription.subscriptionType === 'bi-monthly' ? 15 : 30)
+          );
+          subscription.nextBillingDate = nextDate.toISOString();
+
+          results.push({
+            customer: subscription.bigcommerceCustomerId,
+            transactionId: transactionResponse.getTransId(),
+            message: transactionResponse.getMessages().getMessage()[0].getDescription(),
+          });
+          processedCount++;
+        } else {
+          results.push({
+            customer: subscription.bigcommerceCustomerId,
+            error: 'Payment failed',
+          });
+        }
+
+        resolve();
+      });
+    });
+  }
+
+  // Save updated subscriptions
+  saveSubscriptions(subscriptions);
+
+  res.json({
+    success: true,
+    processed: processedCount,
+    results,
+  });
+});
+
+
+
 // ✅ Start server
 app.listen(PORT, () => {
   console.log(`✅ Heroku server is running and ready on port ${PORT}`);
