@@ -7,25 +7,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
-// ✅ Replace this route:
-app.post('/admin/update-billing-date', (req, res) => {
-  console.log('📬 Billing date update endpoint received the request!');
-
-  // Load all subscriptions
-  let subscriptions = [];
-  try {
-    subscriptions = loadSubscriptions();
-    console.log(`📦 Loaded ${subscriptions.length} subscriptions.`);
-  } catch (err) {
-    console.error('⚠️ Failed to load subscriptions.json:', err);
-    return res.status(500).json({ error: 'Failed to load subscriptions.' });
-  }
-
-  // For now, just respond with how many we found
-  res.json({ message: `Found ${subscriptions.length} subscriptions.` });
-});
-
-
 // Path to JSON database
 const subscriptionsPath = path.join(__dirname, 'subscriptions.json');
 
@@ -140,16 +121,14 @@ app.post('/payment', async (req, res) => {
   }
 });
 
-// ✅ Subscription creation route (with logging)
+// ✅ Subscription creation route
 app.post('/subscribe', (req, res) => {
-  console.log('📦 Received subscription request:', req.body);
-
   const {
     bigcommerceCustomerId,
     authNetCustomerProfileId,
     authNetPaymentProfileId,
     subscriptionType,
-    startDate
+    startDate // ISO string
   } = req.body;
 
   if (
@@ -159,13 +138,6 @@ app.post('/subscribe', (req, res) => {
     !subscriptionType ||
     !startDate
   ) {
-    console.log('❌ Missing fields:', {
-      bigcommerceCustomerId,
-      authNetCustomerProfileId,
-      authNetPaymentProfileId,
-      subscriptionType,
-      startDate
-    });
     return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
 
@@ -190,34 +162,66 @@ app.post('/subscribe', (req, res) => {
   res.json({ success: true, subscription });
 });
 
-// ✅ Route to process all active subscriptions
+// 🔁 Recurring billing route
 app.post('/process-subscriptions', async (req, res) => {
+  const now = new Date();
   const subscriptions = loadSubscriptions();
-  const today = new Date().toISOString().slice(0, 10);
+  const results = [];
 
-  let processedCount = 0;
-  let results = [];
+  for (const subscription of subscriptions) {
+    const nextBillingDate = new Date(subscription.nextBillingDate);
 
-  for (let subscription of subscriptions) {
-    if (subscription.status !== 'active') continue;
+    if (nextBillingDate <= now && subscription.status === 'active') {
+      const transaction = await processSubscriptionPayment(subscription);
 
-    const billingDate = new Date(subscription.nextBillingDate).toISOString().slice(0, 10);
-    if (billingDate > today) continue;
+      if (transaction.success) {
+        const intervalDays = subscription.subscriptionType === 'monthly' ? 30 : 15;
+        subscription.nextBillingDate = new Date(
+          nextBillingDate.setDate(nextBillingDate.getDate() + intervalDays)
+        ).toISOString();
+        results.push({
+          customerId: subscription.bigcommerceCustomerId,
+          status: 'charged',
+          transactionId: transaction.transactionId
+        });
+      } else {
+        results.push({
+          customerId: subscription.bigcommerceCustomerId,
+          status: 'failed',
+          error: transaction.message
+        });
+      }
+    }
+  }
+
+  saveSubscriptions(subscriptions);
+  res.json({ processed: results });
+});
+
+async function processSubscriptionPayment(subscription) {
+  return new Promise((resolve) => {
+    const {
+      authNetCustomerProfileId,
+      authNetPaymentProfileId,
+      subscriptionType,
+    } = subscription;
 
     const merchantAuthentication = new APIContracts.MerchantAuthenticationType();
     merchantAuthentication.setName(process.env.AUTHORIZE_API_LOGIN_ID);
     merchantAuthentication.setTransactionKey(process.env.AUTHORIZE_TRANSACTION_KEY);
 
     const paymentProfile = new APIContracts.PaymentProfile();
-    paymentProfile.setPaymentProfileId(subscription.authNetPaymentProfileId);
+    paymentProfile.setPaymentProfileId(authNetPaymentProfileId);
 
     const profileToCharge = new APIContracts.CustomerProfilePaymentType();
-    profileToCharge.setCustomerProfileId(subscription.authNetCustomerProfileId);
+    profileToCharge.setCustomerProfileId(authNetCustomerProfileId);
     profileToCharge.setPaymentProfile(paymentProfile);
+
+    const amount = subscriptionType === 'monthly' ? 85.00 : 85.00; // 15% off of $100
 
     const transactionRequest = new APIContracts.TransactionRequestType();
     transactionRequest.setTransactionType(APIContracts.TransactionTypeEnum.AUTHCAPTURETRANSACTION);
-    transactionRequest.setAmount(85);
+    transactionRequest.setAmount(amount);
     transactionRequest.setProfile(profileToCharge);
 
     const createRequest = new APIContracts.CreateTransactionRequest();
@@ -226,50 +230,32 @@ app.post('/process-subscriptions', async (req, res) => {
 
     const controller = new APIControllers.CreateTransactionController(createRequest.getJSON());
 
-    await new Promise((resolve) => {
-      controller.execute(() => {
-        const apiResponse = controller.getResponse();
-        const response = new APIContracts.CreateTransactionResponse(apiResponse);
+    controller.execute(() => {
+      const apiResponse = controller.getResponse();
+      const response = new APIContracts.CreateTransactionResponse(apiResponse);
+      const transactionResponse = response.getTransactionResponse();
 
-        const transactionResponse = response.getTransactionResponse();
-        if (
-          response &&
-          response.getMessages().getResultCode() === APIContracts.MessageTypeEnum.OK &&
-          transactionResponse &&
-          transactionResponse.getResponseCode() === '1'
-        ) {
-          const nextDate = new Date(subscription.nextBillingDate);
-          nextDate.setDate(
-            nextDate.getDate() + (subscription.subscriptionType === 'bi-monthly' ? 15 : 30)
-          );
-          subscription.nextBillingDate = nextDate.toISOString();
+      console.log('📋 Auto-charge response:', JSON.stringify(apiResponse, null, 2));
 
-          results.push({
-            customer: subscription.bigcommerceCustomerId,
-            transactionId: transactionResponse.getTransId(),
-            message: transactionResponse.getMessages().getMessage()[0].getDescription(),
-          });
-          processedCount++;
-        } else {
-          results.push({
-            customer: subscription.bigcommerceCustomerId,
-            error: 'Payment failed',
-          });
+      if (
+        response.getMessages().getResultCode() === APIContracts.MessageTypeEnum.OK &&
+        transactionResponse &&
+        transactionResponse.getResponseCode() === '1'
+      ) {
+        resolve({
+          success: true,
+          transactionId: transactionResponse.getTransId(),
+        });
+      } else {
+        let message = 'Unknown error';
+        if (transactionResponse?.getErrors()?.getError()?.[0]) {
+          message = transactionResponse.getErrors().getError()[0].getErrorText();
         }
-
-        resolve();
-      });
+        resolve({ success: false, message });
+      }
     });
-  }
-
-  saveSubscriptions(subscriptions);
-
-  res.json({
-    success: true,
-    processed: processedCount,
-    results,
   });
-});
+}
 
 // ✅ Start server
 app.listen(PORT, () => {
