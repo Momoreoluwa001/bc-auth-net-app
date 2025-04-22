@@ -173,7 +173,7 @@ app.post('/subscribe', async (req, res) => {
     addSubscription(subscription);
     res.json({ success: true, subscription });
   } catch (error) {
-    console.error('❌ Failed to fetch product from BigCommerce:', error.message);
+    console.error('❌ Failed to fetch product from BigCommerce:', error.response?.data || error.message);
     res.status(500).json({ success: false, message: 'Failed to fetch product info from BigCommerce' });
   }
 });
