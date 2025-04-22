@@ -1,16 +1,15 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 const { APIContracts, APIControllers } = require('authorizenet');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
-// Path to JSON database
 const subscriptionsPath = path.join(__dirname, 'subscriptions.json');
 
-// Helper to load saved subscriptions
 function loadSubscriptions() {
   if (!fs.existsSync(subscriptionsPath)) {
     fs.writeFileSync(subscriptionsPath, JSON.stringify([]));
@@ -19,24 +18,20 @@ function loadSubscriptions() {
   return JSON.parse(data);
 }
 
-// Helper to save all subscriptions
 function saveSubscriptions(subscriptions) {
   fs.writeFileSync(subscriptionsPath, JSON.stringify(subscriptions, null, 2));
 }
 
-// Helper to add a new subscription
 function addSubscription(subscription) {
   const subscriptions = loadSubscriptions();
   subscriptions.push(subscription);
   saveSubscriptions(subscriptions);
 }
 
-// ✅ Health check route
 app.get('/', (req, res) => {
   res.send('✅ Heroku server is running and ready!');
 });
 
-// ✅ Payment processing route
 app.post('/payment', async (req, res) => {
   try {
     const { amount, customerProfileId, customerPaymentProfileId, orderId } = req.body;
@@ -121,14 +116,14 @@ app.post('/payment', async (req, res) => {
   }
 });
 
-// ✅ Subscription creation route
 app.post('/subscribe', (req, res) => {
   const {
     bigcommerceCustomerId,
     authNetCustomerProfileId,
     authNetPaymentProfileId,
     subscriptionType,
-    startDate // ISO string
+    startDate,
+    productPrice
   } = req.body;
 
   if (
@@ -136,7 +131,8 @@ app.post('/subscribe', (req, res) => {
     !authNetCustomerProfileId ||
     !authNetPaymentProfileId ||
     !subscriptionType ||
-    !startDate
+    !startDate ||
+    !productPrice
   ) {
     return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
@@ -154,7 +150,8 @@ app.post('/subscribe', (req, res) => {
     startDate,
     nextBillingDate: nextBillingDate.toISOString(),
     discountApplied: true,
-    status: 'active'
+    status: 'active',
+    productPrice
   };
 
   addSubscription(subscription);
@@ -162,7 +159,6 @@ app.post('/subscribe', (req, res) => {
   res.json({ success: true, subscription });
 });
 
-// 🔁 Recurring billing route
 app.post('/process-subscriptions', async (req, res) => {
   const now = new Date();
   const subscriptions = loadSubscriptions();
@@ -179,6 +175,9 @@ app.post('/process-subscriptions', async (req, res) => {
         subscription.nextBillingDate = new Date(
           nextBillingDate.setDate(nextBillingDate.getDate() + intervalDays)
         ).toISOString();
+
+        await createBigCommerceOrder(subscription.bigcommerceCustomerId, transaction.transactionId);
+
         results.push({
           customerId: subscription.bigcommerceCustomerId,
           status: 'charged',
@@ -204,6 +203,7 @@ async function processSubscriptionPayment(subscription) {
       authNetCustomerProfileId,
       authNetPaymentProfileId,
       subscriptionType,
+      productPrice
     } = subscription;
 
     const merchantAuthentication = new APIContracts.MerchantAuthenticationType();
@@ -217,7 +217,8 @@ async function processSubscriptionPayment(subscription) {
     profileToCharge.setCustomerProfileId(authNetCustomerProfileId);
     profileToCharge.setPaymentProfile(paymentProfile);
 
-    const amount = subscriptionType === 'monthly' ? 85.00 : 85.00; // 15% off of $100
+    const discountRate = 0.15;
+    const amount = parseFloat((parseFloat(productPrice) * (1 - discountRate)).toFixed(2));
 
     const transactionRequest = new APIContracts.TransactionRequestType();
     transactionRequest.setTransactionType(APIContracts.TransactionTypeEnum.AUTHCAPTURETRANSACTION);
@@ -257,7 +258,54 @@ async function processSubscriptionPayment(subscription) {
   });
 }
 
-// ✅ Start server
+async function createBigCommerceOrder(customerId, transactionId) {
+  try {
+    const productRes = await axios.get(
+      `https://api.bigcommerce.com/stores/${process.env.BC_STORE_HASH}/v3/catalog/products`,
+      {
+        headers: {
+          'X-Auth-Token': process.env.BC_ACCESS_TOKEN,
+          Accept: 'application/json'
+        },
+        params: {
+          tag: 'auto-subscribe',
+          availability: 'available'
+        }
+      }
+    );
+
+    const products = productRes.data.data.map(p => ({
+      product_id: p.id,
+      quantity: 1
+    }));
+
+    if (!products.length) throw new Error('No auto-subscribe products available.');
+
+    const response = await axios.post(
+      `https://api.bigcommerce.com/stores/${process.env.BC_STORE_HASH}/v2/orders`,
+      {
+        customer_id: customerId,
+        status_id: 2,
+        products,
+        payment_method: 'Authorize.Net Subscription',
+        external_source: 'Authorize.Net',
+        external_id: transactionId
+      },
+      {
+        headers: {
+          'X-Auth-Token': process.env.BC_ACCESS_TOKEN,
+          'Content-Type': 'application/json',
+          Accept: 'application/json'
+        }
+      }
+    );
+
+    console.log('🛒 BigCommerce order created:', response.data.id);
+  } catch (err) {
+    console.error('❌ Failed to create BigCommerce order:', err.response?.data || err.message);
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`✅ Heroku server is running and ready on port ${PORT}`);
 });
