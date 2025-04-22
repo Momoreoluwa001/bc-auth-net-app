@@ -7,6 +7,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
+
+app.post('/admin/update-billing-date', async (req, res) => {
+  console.log('📅 Admin requested to update billing date:', req.body);
+
+  // For now, just send a success response for testing
+  res.status(200).json({ message: 'Billing date update endpoint received the request!' });
+});
+
+
 // Path to JSON database
 const subscriptionsPath = path.join(__dirname, 'subscriptions.json');
 
