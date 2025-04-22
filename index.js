@@ -7,12 +7,22 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
+// ✅ Replace this route:
+app.post('/admin/update-billing-date', (req, res) => {
+  console.log('📬 Billing date update endpoint received the request!');
 
-app.post('/admin/update-billing-date', async (req, res) => {
-  console.log('📅 Admin requested to update billing date:', req.body);
+  // Load all subscriptions
+  let subscriptions = [];
+  try {
+    subscriptions = loadSubscriptions();
+    console.log(`📦 Loaded ${subscriptions.length} subscriptions.`);
+  } catch (err) {
+    console.error('⚠️ Failed to load subscriptions.json:', err);
+    return res.status(500).json({ error: 'Failed to load subscriptions.' });
+  }
 
-  // For now, just send a success response for testing
-  res.status(200).json({ message: 'Billing date update endpoint received the request!' });
+  // For now, just respond with how many we found
+  res.json({ message: `Found ${subscriptions.length} subscriptions.` });
 });
 
 
@@ -132,7 +142,7 @@ app.post('/payment', async (req, res) => {
 
 // ✅ Subscription creation route (with logging)
 app.post('/subscribe', (req, res) => {
-  console.log('📦 Received subscription request:', req.body); // <-- Log body
+  console.log('📦 Received subscription request:', req.body);
 
   const {
     bigcommerceCustomerId,
@@ -180,11 +190,10 @@ app.post('/subscribe', (req, res) => {
   res.json({ success: true, subscription });
 });
 
-
 // ✅ Route to process all active subscriptions
 app.post('/process-subscriptions', async (req, res) => {
   const subscriptions = loadSubscriptions();
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const today = new Date().toISOString().slice(0, 10);
 
   let processedCount = 0;
   let results = [];
@@ -195,7 +204,6 @@ app.post('/process-subscriptions', async (req, res) => {
     const billingDate = new Date(subscription.nextBillingDate).toISOString().slice(0, 10);
     if (billingDate > today) continue;
 
-    // Process payment
     const merchantAuthentication = new APIContracts.MerchantAuthenticationType();
     merchantAuthentication.setName(process.env.AUTHORIZE_API_LOGIN_ID);
     merchantAuthentication.setTransactionKey(process.env.AUTHORIZE_TRANSACTION_KEY);
@@ -209,7 +217,7 @@ app.post('/process-subscriptions', async (req, res) => {
 
     const transactionRequest = new APIContracts.TransactionRequestType();
     transactionRequest.setTransactionType(APIContracts.TransactionTypeEnum.AUTHCAPTURETRANSACTION);
-    transactionRequest.setAmount(85); // 👈 Adjust your actual charge amount
+    transactionRequest.setAmount(85);
     transactionRequest.setProfile(profileToCharge);
 
     const createRequest = new APIContracts.CreateTransactionRequest();
@@ -230,7 +238,6 @@ app.post('/process-subscriptions', async (req, res) => {
           transactionResponse &&
           transactionResponse.getResponseCode() === '1'
         ) {
-          // Update subscription billing date
           const nextDate = new Date(subscription.nextBillingDate);
           nextDate.setDate(
             nextDate.getDate() + (subscription.subscriptionType === 'bi-monthly' ? 15 : 30)
@@ -255,7 +262,6 @@ app.post('/process-subscriptions', async (req, res) => {
     });
   }
 
-  // Save updated subscriptions
   saveSubscriptions(subscriptions);
 
   res.json({
@@ -264,8 +270,6 @@ app.post('/process-subscriptions', async (req, res) => {
     results,
   });
 });
-
-
 
 // ✅ Start server
 app.listen(PORT, () => {
