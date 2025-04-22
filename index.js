@@ -116,14 +116,14 @@ app.post('/payment', async (req, res) => {
   }
 });
 
-app.post('/subscribe', (req, res) => {
+app.post('/subscribe', async (req, res) => {
   const {
     bigcommerceCustomerId,
     authNetCustomerProfileId,
     authNetPaymentProfileId,
     subscriptionType,
     startDate,
-    productPrice
+    productId
   } = req.body;
 
   if (
@@ -132,31 +132,50 @@ app.post('/subscribe', (req, res) => {
     !authNetPaymentProfileId ||
     !subscriptionType ||
     !startDate ||
-    !productPrice
+    !productId
   ) {
     return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
 
-  const nextBillingDate = new Date(startDate);
-  nextBillingDate.setDate(
-    nextBillingDate.getDate() + (subscriptionType === 'bi-monthly' ? 15 : 30)
-  );
+  try {
+    const productRes = await axios.get(
+      `https://api.bigcommerce.com/stores/${process.env.BC_STORE_HASH}/v3/catalog/products/${productId}`,
+      {
+        headers: {
+          'X-Auth-Token': process.env.BC_ACCESS_TOKEN,
+          Accept: 'application/json'
+        }
+      }
+    );
 
-  const subscription = {
-    bigcommerceCustomerId,
-    authNetCustomerProfileId,
-    authNetPaymentProfileId,
-    subscriptionType,
-    startDate,
-    nextBillingDate: nextBillingDate.toISOString(),
-    discountApplied: true,
-    status: 'active',
-    productPrice
-  };
+    const productPrice = parseFloat(productRes.data.data.price);
+    const discountRate = 0.15;
+    const discountedPrice = parseFloat((productPrice * (1 - discountRate)).toFixed(2));
 
-  addSubscription(subscription);
+    const nextBillingDate = new Date(startDate);
+    nextBillingDate.setDate(
+      nextBillingDate.getDate() + (subscriptionType === 'bi-monthly' ? 15 : 30)
+    );
 
-  res.json({ success: true, subscription });
+    const subscription = {
+      bigcommerceCustomerId,
+      authNetCustomerProfileId,
+      authNetPaymentProfileId,
+      subscriptionType,
+      startDate,
+      nextBillingDate: nextBillingDate.toISOString(),
+      discountApplied: true,
+      status: 'active',
+      productId,
+      productPrice: discountedPrice
+    };
+
+    addSubscription(subscription);
+    res.json({ success: true, subscription });
+  } catch (error) {
+    console.error('❌ Failed to fetch product from BigCommerce:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch product info from BigCommerce' });
+  }
 });
 
 app.post('/process-subscriptions', async (req, res) => {
@@ -202,7 +221,6 @@ async function processSubscriptionPayment(subscription) {
     const {
       authNetCustomerProfileId,
       authNetPaymentProfileId,
-      subscriptionType,
       productPrice
     } = subscription;
 
@@ -217,12 +235,9 @@ async function processSubscriptionPayment(subscription) {
     profileToCharge.setCustomerProfileId(authNetCustomerProfileId);
     profileToCharge.setPaymentProfile(paymentProfile);
 
-    const discountRate = 0.15;
-    const amount = parseFloat((parseFloat(productPrice) * (1 - discountRate)).toFixed(2));
-
     const transactionRequest = new APIContracts.TransactionRequestType();
     transactionRequest.setTransactionType(APIContracts.TransactionTypeEnum.AUTHCAPTURETRANSACTION);
-    transactionRequest.setAmount(amount);
+    transactionRequest.setAmount(parseFloat(productPrice));
     transactionRequest.setProfile(profileToCharge);
 
     const createRequest = new APIContracts.CreateTransactionRequest();
