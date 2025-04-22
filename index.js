@@ -136,10 +136,11 @@ app.post('/subscribe', async (req, res) => {
   ) {
     return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
+  console.log("Fetching product with ID:", productId);
 
   try {
     const productRes = await axios.get(
-      `https://api.bigcommerce.com/stores/${process.env.BC_STORE_HASH}/v3/catalog/products/${productId}`,
+      `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v3/catalog/products/${productId}`,
       {
         headers: {
           'X-Auth-Token': process.env.BC_ACCESS_TOKEN,
@@ -276,7 +277,7 @@ async function processSubscriptionPayment(subscription) {
 async function createBigCommerceOrder(customerId, transactionId) {
   try {
     const productRes = await axios.get(
-      `https://api.bigcommerce.com/stores/${process.env.BC_STORE_HASH}/v3/catalog/products`,
+      `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v3/catalog/products`,
       {
         headers: {
           'X-Auth-Token': process.env.BC_ACCESS_TOKEN,
@@ -297,7 +298,7 @@ async function createBigCommerceOrder(customerId, transactionId) {
     if (!products.length) throw new Error('No auto-subscribe products available.');
 
     const response = await axios.post(
-      `https://api.bigcommerce.com/stores/${process.env.BC_STORE_HASH}/v2/orders`,
+      `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v2/orders`,
       {
         customer_id: customerId,
         status_id: 2,
