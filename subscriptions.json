@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "bigcommerceCustomerId": 1,
+    "authNetCustomerProfileId": "600221911",
+    "authNetPaymentProfileId": "600013082",
+    "subscriptionType": "monthly",
+    "startDate": "2025-04-01T00:00:00.000Z",
+    "nextBillingDate": "2025-04-20T00:00:00.000Z",
+    "discountApplied": true,
+    "status": "active",
+    "productId": 112,
+    "productPrice": 29.75
+  }
+]
