@@ -1,33 +1,32 @@
-require('dotenv').config();
-console.log("Store hash:", process.env.BIGCOMMERCE_STORE_HASH);
 const axios = require('axios');
 
+const BC_STORE_HASH = process.env.BIGCOMMERCE_STORE_HASH;
+const BC_ACCESS_TOKEN = process.env.BC_ACCESS_TOKEN;
 
-async function registerWebhook() {
-  try {
-    const response = await axios.post(
-      `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v3/hooks`,
-      {
-        scope: 'store/order/created',
-        destination: 'https://bc-auth-net-c8527f0cc72c.herokuapp.com/webhook',
-        is_active: true
-      },
-      {
-        headers: {
-          'X-Auth-Token': process.env.BC_ACCESS_TOKEN,
-          'X-Auth-Client': process.env.BIGCOMMERCE_CLIENT_ID,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
-    );
+const webhookUrl = `https://api.bigcommerce.com/stores/${BC_STORE_HASH}/v3/hooks`;
 
-    console.log('✅ Webhook registered successfully:', response.data);
-  } catch (error) {
-    console.error('❌ Failed to register webhook:', error.response?.data || error.message);
-    console.error('❌ Full error:', error); // 🔍 This shows deeper details
-  }
-  
-}
+const webhookData = {
+  scope: 'store/order/created',
+  destination: `https://bc-auth-net-c8527f0cc72c.herokuapp.com/webhook`,
+  is_active: true,
+  events_history_enabled: true
+};
 
-registerWebhook();
+const headers = {
+  'X-Auth-Token': BC_ACCESS_TOKEN,
+  'Content-Type': 'application/json',
+  Accept: 'application/json'
+};
+
+axios
+  .post(webhookUrl, webhookData, { headers })
+  .then((response) => {
+    console.log('✅ Webhook registered:', response.data.data);
+  })
+  .catch((error) => {
+    if (error.response) {
+      console.error('❌ Error registering webhook:', error.response.data);
+    } else {
+      console.error('❌ Error:', error.message);
+    }
+  });
