@@ -1,5 +1,7 @@
-const axios = require('axios');
 require('dotenv').config();
+console.log("Store hash:", process.env.BIGCOMMERCE_STORE_HASH);
+const axios = require('axios');
+
 
 async function registerWebhook() {
   try {
