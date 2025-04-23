@@ -28,13 +28,16 @@ const run = async () => {
       } = sub;
 
       // ✅ Only charge if today is the billing date
-      const today = new Date().toISOString().split('T')[0];
-      const billingDay = new Date(nextBillingDate).toISOString().split('T')[0];
+      // const today = new Date().toISOString().split('T')[0];
+// const billingDay = new Date(nextBillingDate).toISOString().split('T')[0];
 
-      if (billingDay !== today) {
-        console.log(`⏭️ Skipping customer ${bigcommerceCustomerId} (not billing day: ${billingDay})`);
-        continue;
-      }
+// if (billingDay !== today) {
+//   console.log(`⏭️ Skipping customer ${bigcommerceCustomerId} (not billing day: ${billingDay})`);
+//   continue;
+// }
+
+console.log(`🧪 Test mode: running charge for customer ${bigcommerceCustomerId}`);
+
 
       // ✅ 1. Charge the customer
       const chargeResponse = await chargeCustomer(
