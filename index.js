@@ -323,10 +323,11 @@ async function createBigCommerceOrder(customerId, transactionId) {
 }
 
 
-app.post('/webhook', async (req, res) => {
-  console.log('📦 BigCommerce Webhook Received:', req.body);
+app.post('/webhook', express.json(), (req, res) => {
+  console.log('📦 Webhook received:', req.body);
   res.status(200).send('Webhook received');
 });
+
 
 app.listen(PORT, () => {
   console.log(`✅ Heroku server is running and ready on port ${PORT}`);
