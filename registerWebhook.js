@@ -23,7 +23,9 @@ async function registerWebhook() {
     console.log('✅ Webhook registered successfully:', response.data);
   } catch (error) {
     console.error('❌ Failed to register webhook:', error.response?.data || error.message);
+    console.error('❌ Full error:', error); // 🔍 This shows deeper details
   }
+  
 }
 
 registerWebhook();
