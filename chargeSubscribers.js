@@ -1,82 +1,78 @@
 // chargeSubscribers.js
-const fs = require("fs");
-const path = require("path");
-const axios = require("axios");
-const { chargeCustomer } = require("./authorizeNet");
-const { createBigCommerceOrder } = require("./bigcommerce");
 
-const subscriptionsFile = path.join(__dirname, "data", "subscriptions.json");
+require('dotenv').config();
+const { getAllSubscriptions, updateNextBillingDate } = require('./data/subscriptionStorage');
+const { chargeCustomer } = require('./data/authorizeNet');
+const { createOrder } = require('./bigcommerce');
 
-function getTodayDateISO() {
-  const now = new Date();
-  return now.toISOString().split("T")[0];
-}
+const run = async () => {
+  console.log('🚀 Starting subscription billing job...');
+  const subscriptions = await getAllSubscriptions();
 
-function addMonths(date, count) {
-  const newDate = new Date(date);
-  newDate.setMonth(newDate.getMonth() + count);
-  return newDate.toISOString();
-}
+  if (!subscriptions || subscriptions.length === 0) {
+    console.log('📭 No active subscriptions found.');
+    return;
+  }
 
-function addDays(date, count) {
-  const newDate = new Date(date);
-  newDate.setDate(newDate.getDate() + count);
-  return newDate.toISOString();
-}
-
-async function processSubscriptions() {
-  const raw = fs.readFileSync(subscriptionsFile, "utf-8");
-  const subscriptions = JSON.parse(raw);
-  const today = getTodayDateISO();
-
-  for (let sub of subscriptions) {
-    if (sub.status !== "active") continue;
-
-    const billingDate = new Date(sub.nextBillingDate).toISOString().split("T")[0];
-    if (billingDate !== today) continue;
-
-    console.log(`🔄 Processing customer ${sub.bigcommerceCustomerId}`);
-
+  for (const sub of subscriptions) {
     try {
-      const chargeResult = await chargeCustomer({
-        profileId: sub.authNetCustomerProfileId,
-        paymentProfileId: sub.authNetPaymentProfileId,
-        amount: sub.productPrice
-      });
+      const {
+        bigcommerceCustomerId,
+        authNetCustomerProfileId,
+        authNetPaymentProfileId,
+        productId,
+        productPrice,
+        subscriptionType,
+        nextBillingDate
+      } = sub;
 
-      if (!chargeResult.success) {
-        console.log(`❌ Charge failed for ${sub.bigcommerceCustomerId}`);
+      // ✅ Only charge if today is the billing date
+      const today = new Date().toISOString().split('T')[0];
+      const billingDay = new Date(nextBillingDate).toISOString().split('T')[0];
+
+      if (billingDay !== today) {
+        console.log(`⏭️ Skipping customer ${bigcommerceCustomerId} (not billing day: ${billingDay})`);
         continue;
       }
 
-      const orderResult = await createBigCommerceOrder({
-        customerId: sub.bigcommerceCustomerId,
-        productId: sub.productId,
-        price: sub.productPrice
-      });
+      // ✅ 1. Charge the customer
+      const chargeResponse = await chargeCustomer(
+        authNetCustomerProfileId,
+        authNetPaymentProfileId,
+        productPrice
+      );
 
-      if (!orderResult.success) {
-        console.log(`⚠️ Order creation failed for ${sub.bigcommerceCustomerId}`);
+      if (!chargeResponse.success) {
+        console.error(`❌ Payment failed for customer ${bigcommerceCustomerId}`);
         continue;
       }
 
-      // Update next billing date
-      if (sub.subscriptionType === "monthly") {
-        sub.nextBillingDate = addMonths(sub.nextBillingDate, 1);
-      } else if (sub.subscriptionType === "bi-monthly") {
-        sub.nextBillingDate = addDays(sub.nextBillingDate, 14);
+      console.log(`💳 Charged $${productPrice} for customer ${bigcommerceCustomerId}`);
+
+      // ✅ 2. Create BigCommerce order
+      const order = await createOrder(
+        bigcommerceCustomerId,
+        productId,
+        productPrice
+      );
+
+      if (!order || !order.id) {
+        console.error(`❌ Order creation failed for customer ${bigcommerceCustomerId}`);
+        continue;
       }
 
-      console.log(`✅ Charged and created order for ${sub.bigcommerceCustomerId}`);
+      console.log(`🛒 Created BigCommerce order #${order.id} for customer ${bigcommerceCustomerId}`);
+
+      // ✅ 3. Update next billing date
+      await updateNextBillingDate(bigcommerceCustomerId, subscriptionType);
+      console.log(`📆 Updated next billing date for customer ${bigcommerceCustomerId}`);
 
     } catch (err) {
-      console.error(`💥 Error with ${sub.bigcommerceCustomerId}:`, err.message);
+      console.error(`❌ Error with customer ${sub.bigcommerceCustomerId}:`, err.message || err);
     }
   }
 
-  // Save updated subscriptions
-  fs.writeFileSync(subscriptionsFile, JSON.stringify(subscriptions, null, 2));
-  console.log("✅ All due subscriptions processed.");
-}
+  console.log('✅ Subscription billing job finished.');
+};
 
-processSubscriptions();
+run();
