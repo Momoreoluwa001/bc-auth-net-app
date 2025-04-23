@@ -3,7 +3,8 @@
 require('dotenv').config();
 const { getAllSubscriptions, updateNextBillingDate } = require('./data/subscriptionStorage');
 const { chargeCustomer } = require('./data/authorizeNet');
-const { createOrder } = require('./bigcommerce');
+const { createOrder } = require('./data/bigcommerce');
+
 
 const run = async () => {
   console.log('🚀 Starting subscription billing job...');
